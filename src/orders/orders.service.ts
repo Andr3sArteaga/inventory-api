@@ -1,9 +1,11 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../database/prisma.service';
+import { Prisma } from '../generated/prisma/client';
 import { MovementType, OrderStatus } from '../generated/prisma/enums';
 import { InventoryService } from '../inventory/inventory.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { FindOrdersQueryDto } from './dto/find-orders-query.dto';
+import { OrderResponseDto } from './dto/order-response.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
 
 // decision: valid transitions as a lookup table instead of an if/else chain. Checking
@@ -26,6 +28,32 @@ const ORDER_INCLUDE = {
   },
 } as const;
 
+type OrderWithItems = Prisma.OrderGetPayload<{ include: typeof ORDER_INCLUDE }>;
+
+// decision: unitPrice comes back from Prisma as a Decimal, same reason
+// ProductResponseDto stringifies price — JSON-serializing a Decimal loses none of its
+// precision either way (Decimal.js's toJSON already returns a string), but this mapper
+// makes that conversion explicit at the type level instead of relying on it happening
+// implicitly during response serialization.
+function toOrderResponse(order: OrderWithItems): OrderResponseDto {
+  return {
+    id: order.id,
+    customerName: order.customerName,
+    address: order.address,
+    status: order.status,
+    createdAt: order.createdAt,
+    updatedAt: order.updatedAt,
+    items: order.items.map((item) => ({
+      id: item.id,
+      orderId: item.orderId,
+      productId: item.productId,
+      quantity: item.quantity,
+      unitPrice: item.unitPrice.toString(),
+      product: item.product,
+    })),
+  };
+}
+
 @Injectable()
 export class OrdersService {
   constructor(
@@ -33,7 +61,7 @@ export class OrdersService {
     private readonly inventoryService: InventoryService,
   ) {}
 
-  async create(dto: CreateOrderDto) {
+  async create(dto: CreateOrderDto): Promise<OrderResponseDto> {
     return this.prisma.$transaction(async (tx) => {
       const products = await tx.product.findMany({
         where: {
@@ -86,10 +114,11 @@ export class OrdersService {
         );
       }
 
-      return tx.order.findUniqueOrThrow({
+      const created = await tx.order.findUniqueOrThrow({
         where: { id: order.id },
         include: ORDER_INCLUDE,
       });
+      return toOrderResponse(created);
     });
   }
 
@@ -110,7 +139,7 @@ export class OrdersService {
     ]);
 
     return {
-      data,
+      data: data.map(toOrderResponse),
       meta: {
         page,
         pageSize,
@@ -120,7 +149,7 @@ export class OrdersService {
     };
   }
 
-  async findOne(id: string) {
+  async findOne(id: string): Promise<OrderResponseDto> {
     const order = await this.prisma.order.findUnique({
       where: { id },
       include: ORDER_INCLUDE,
@@ -128,10 +157,10 @@ export class OrdersService {
     if (!order) {
       throw new NotFoundException(`Order ${id} not found`);
     }
-    return order;
+    return toOrderResponse(order);
   }
 
-  async updateStatus(id: string, dto: UpdateOrderStatusDto) {
+  async updateStatus(id: string, dto: UpdateOrderStatusDto): Promise<OrderResponseDto> {
     return this.prisma.$transaction(async (tx) => {
       const current = await tx.order.findUnique({
         where: { id },
@@ -166,11 +195,12 @@ export class OrdersService {
         }
       }
 
-      return tx.order.update({
+      const updated = await tx.order.update({
         where: { id },
         data: { status: dto.status },
         include: ORDER_INCLUDE,
       });
+      return toOrderResponse(updated);
     });
   }
 }
