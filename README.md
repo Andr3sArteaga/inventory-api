@@ -242,16 +242,39 @@ Prisma no tiene, en su archivo de definición de esquema, una forma de declarar 
 
 ## Testing
 
-Este proyecto tiene tests unitarios (de caja blanca, es decir: prueban la lógica interna directamente, no solo el resultado final) para las dos partes más delicadas del sistema: la máquina de estados de las órdenes y la lógica de movimientos de inventario (incluyendo el mecanismo que evita el stock negativo bajo concurrencia).
+Este proyecto tiene dos tipos de pruebas, cubriendo tanto la lógica interna como los endpoints reales.
+
+### Tests unitarios (caja blanca)
+
+Prueban la lógica de negocio directamente, sin pasar por HTTP ni por la base de datos real — usan objetos simulados (mocks) de Prisma en su lugar.
 
 ```bash
 npm test
 ```
 
-- Cubren, entre otras cosas: cada transición de estado válida e inválida de una orden, que cancelar una orden repone el stock de cada item, que una reserva de stock fallida revierte toda la orden, y que un movimiento de inventario nunca modifica nada si la validación de stock falla.
-- **No necesitan la base de datos ni Docker levantados** — usan objetos simulados (mocks) de Prisma en lugar de una conexión real. Esto se confirmó apagando el contenedor de Docker y corriendo la suite completa igual con éxito.
+Cubren las tres partes más delicadas del sistema:
+- **Productos**: que crear/editar/eliminar un producto genera el registro de historial correcto (incluyendo el detalle exacto de qué campo cambió), que un nombre duplicado se rechaza en las dos capas de defensa (la validación previa y el catch del error de la base de datos), y que un producto ya eliminado no puede editarse de nuevo.
+- **Órdenes**: cada transición de estado válida e inválida, que cancelar una orden repone el stock de cada item, y que una reserva de stock fallida revierte toda la orden.
+- **Inventario**: que un movimiento nunca modifica nada si la validación de stock falla, y que el mecanismo que evita el stock negativo bajo concurrencia funciona como se espera.
 
----
+No necesitan la base de datos ni Docker levantados — esto se confirmó apagando el contenedor y corriendo la suite completa igual con éxito.
+
+### Tests end-to-end / e2e (caja negra)
+
+Prueban la API real por HTTP, de punta a punta (petición → validación → base de datos → respuesta), usando una base de datos de PostgreSQL **separada** (`inventory_test`) para no afectar los datos de desarrollo.
+
+```bash
+npm run test:e2e
+```
+
+Este comando primero crea la base de datos de test (si no existe) y le aplica las migraciones, y después corre las pruebas. Cubren los casos exigidos por el enunciado:
+- Un caso exitoso (crear un producto válido).
+- Una validación incorrecta (un precio negativo).
+- Un intento de duplicado (dos productos activos con el mismo nombre).
+- Una transición de estado inválida en una orden.
+- Un intento de generar stock negativo (pedir más cantidad de la disponible).
+
+> Las pruebas e2e corren de forma secuencial (no en paralelo) porque limpian las tablas de la base de test entre cada prueba, y correrlas en paralelo generaba conflictos entre suites que comparten la misma base.
 
 ## Estructura del proyecto
 
@@ -283,3 +306,4 @@ inventory-api/
 **Qué se usó:** Claude (de Anthropic) — tanto en conversación para el diseño y las decisiones de arquitectura, como Claude Code para la implementación real del código, las migraciones, la documentación de Swagger, los tests y este mismo README.
 
 **Cómo se usó:** el diseño de cada modelo de datos (qué campos tiene cada tabla, qué restricciones aplican, cómo se relacionan entre sí), las reglas de negocio (cuándo se rechaza una transición de estado, cuándo se reserva o repone stock, qué hace soft-delete y por qué) y los criterios de validación de cada endpoint fueron discutidos y decididos explicando el razonamiento de negocio de cada regla antes de que se escribiera una sola línea de código — la IA no inventó reglas de negocio por su cuenta. A partir de ahí, la IA ayudó a traducir esas decisiones a código Nest/Prisma concreto (servicios, controladores, DTOs, migraciones SQL), a redactar la documentación de Swagger endpoint por endpoint, a escribir la suite de tests unitarios, y a armar este README. Cada módulo se revisó y se probó contra la base de datos real antes de aprobar el siguiente. Un caso concreto y verificable: la lógica original de `applyMovement` tenía una condición de carrera real bajo concurrencia (dos escrituras simultáneas podían dejar el stock negativo); ese defecto fue señalado explícitamente como corrección a aplicar, con la solución exacta especificada (una sola operación atómica `updateMany` con la condición de stock en el `WHERE`), y luego verificado con una prueba de concurrencia real antes de aceptarlo. En el código, los pocos puntos donde la implementación tomó una decisión propia no especificada en detalle (por ejemplo, la forma exacta de la paginación, o cómo se comparte la transacción de Prisma entre `orders.service` e `inventory.service`) están marcados explícitamente con comentarios `// decision:` explicando el porqué.
+
