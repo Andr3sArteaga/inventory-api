@@ -71,10 +71,15 @@ export class ProductsService {
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? 10;
 
-    // decision: offset pagination via page/pageSize query params, returned as
-    // { data, meta } so the client gets total/totalPages without a second request.
-    // Cursor pagination would scale better on huge tables, but for a product catalog
-    // of this size page/pageSize is simpler to consume and to defend.
+    
+    // Decisión: se utiliza paginación por desplazamiento (offset) mediante los
+    // parámetros page y pageSize. La respuesta se devuelve como { data, meta },
+    // permitiendo que el cliente conozca el total de registros y el total de páginas
+    // sin realizar una segunda petición.
+    // La paginación basada en cursores (cursor pagination) podría escalar mejor en
+    // tablas con millones de registros, pero para un catálogo de productos de este
+    // tamaño, page/pageSize es más sencillo de implementar, consumir y justificar.
+
     const [data, total] = await this.prisma.$transaction([
       this.prisma.product.findMany({
         where: { available: true },

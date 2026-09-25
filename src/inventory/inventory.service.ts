@@ -51,36 +51,53 @@ export class InventoryService {
     reason?: string | null,
     orderId?: string | null,
   ) {
-    // decision: a soft-deleted product (available: false) is treated as "not found"
-    // here too, same convention as ProductsService — it's gone from the catalog, not
-    // merely "in conflict", so a movement against it is a 404, not a 409.
-    const product = await client.product.findFirst({
-      where: { id: productId, available: true },
-    });
-    if (!product) {
-      throw new NotFoundException(`Product ${productId} not found`);
-    }
+    // decision: the stock check and the stock write used to be a findFirst (read
+    // stock into JS) followed by a separate update(newStock) — classic read-modify-write.
+    // Under real concurrency, two applyMovement calls on the same product can both run
+    // their findFirst before either writes, both see the same "old" stock, both compute
+    // a delta that looks valid on its own, and both commit — landing stock below zero
+    // even though each call individually checked it. Folding the validity check into the
+    // WHERE clause of a single updateMany fixes this: Postgres takes a row lock for the
+    // UPDATE, so the two concurrent calls are serialized by the database itself. The
+    // first one to commit changes the row; the second one's WHERE (stock >= quantity)
+    // is then evaluated against the ALREADY-updated stock, not stale data, so it matches
+    // zero rows instead of double-applying. No application-level lock or retry needed —
+    // Postgres is doing the serializing.
+    const where: Prisma.ProductWhereInput =
+      type === MovementType.OUT
+        ? { id: productId, available: true, stock: { gte: quantity } }
+        : { id: productId, available: true };
 
-    const delta = type === MovementType.IN ? quantity : -quantity;
-    const newStock = product.stock + delta;
+    const data: Prisma.ProductUpdateManyMutationInput =
+      type === MovementType.OUT
+        ? { stock: { decrement: quantity } }
+        : { stock: { increment: quantity } };
 
-    if (newStock < 0) {
+    const result = await client.product.updateMany({ where, data });
+
+    if (result.count === 0) {
+      // decision: updateMany's `count` says the WHERE matched nothing, but not why —
+      // missing product, soft-deleted product, and insufficient stock all produce
+      // count: 0. This findFirst runs only on this failure path (never on the success
+      // path, which is the common case) purely to build an accurate error message; it
+      // does not get a vote on whether the movement was valid — the updateMany above
+      // already decided that atomically, before this line ever runs.
+      const product = await client.product.findFirst({
+        where: { id: productId, available: true },
+      });
+      if (!product) {
+        throw new NotFoundException(`Product ${productId} not found`);
+      }
       throw new UnprocessableEntityException(
-        `Movement of ${quantity} ${type} would leave stock at ${newStock} for product ${productId} (current stock: ${product.stock})`,
+        `Movement of ${quantity} ${type} would leave stock at ${
+          product.stock - quantity
+        } for product ${productId} (current stock: ${product.stock})`,
       );
     }
 
-    const [movement] = await Promise.all([
-      client.inventoryMovement.create({
-        data: { productId, type, quantity, reason, orderId },
-      }),
-      client.product.update({
-        where: { id: productId },
-        data: { stock: newStock },
-      }),
-    ]);
-
-    return movement;
+    return client.inventoryMovement.create({
+      data: { productId, type, quantity, reason, orderId },
+    });
   }
 
   create(dto: CreateMovementDto) {
