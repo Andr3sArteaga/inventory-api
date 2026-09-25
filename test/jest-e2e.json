@@ -1,9 +1,15 @@
 {
   "moduleFileExtensions": ["js", "json", "ts"],
-  "rootDir": ".",
+  "rootDir": "..",
   "testEnvironment": "node",
   "testRegex": ".e2e-spec.ts$",
+  "transformIgnorePatterns": ["/node_modules/(?!@nestjs/)"],
   "transform": {
-    "^.+\\.(t|j)s$": "ts-jest"
+    "^.+\\.ts$": ["ts-jest", { "tsconfig": "<rootDir>/tsconfig.spec.json" }],
+    "^.+\\.js$": "<rootDir>/test/transformers/nestjs-esm.js"
+  },
+  "moduleNameMapper": {
+    "swagger-ui/index\\.js$": "<rootDir>/test/stubs/swagger-ui.stub.js",
+    "^(\\.{1,2}/.*)\\.js$": "$1"
   }
 }

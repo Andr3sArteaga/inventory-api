@@ -18,7 +18,8 @@
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
-    "test:e2e": "jest --config ./test/jest-e2e.json",
+    "test:e2e:setup": "dotenv -e .env.test -- tsx scripts/ensure-test-db.ts && dotenv -e .env.test -- npx prisma migrate deploy",
+    "test:e2e": "npm run test:e2e:setup && dotenv -e .env.test -- jest --config ./test/jest-e2e.json --runInBand",
     "db:seed": "tsx prisma/seed.ts"
   },
   "dependencies": {
@@ -48,6 +49,7 @@
     "@types/pg": "^8.23.1",
     "@types/supertest": "^7.0.0",
     "babel-plugin-transform-import-meta": "^3.0.0",
+    "dotenv-cli": "^11.0.0",
     "jest": "^30.0.0",
     "oxlint": "^1.58.0",
     "prettier": "^3.4.2",
