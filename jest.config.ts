@@ -22,20 +22,28 @@ const config: Config = {
   // require(esm) capability (only from Node v24.9+, per Jest's own error message), so a
   // plain CJS transform that only covers our OWN source under src/ still breaks the
   // moment a spec file requires @nestjs/testing. Un-ignoring @nestjs's own files lets
-  // Jest transform them too — but ts-jest alone still can't fully lower one specific
-  // file (@nestjs/common's load-package.util.js), which uses `import.meta.url` for its
-  // optional-peer-dependency loader. `import.meta` has no CommonJS equivalent, so no
-  // TS module target can rewrite it; only a dedicated Babel plugin can. Hence two
-  // transforms below: ts-jest for our own .ts (unaffected by any of this), babel-jest
-  // (see babel.config.js) for the handful of @nestjs .js files that need import.meta
-  // rewritten. Runtime stays plain CommonJS end to end — no --experimental-vm-modules,
-  // no touching package.json.
+  // Jest transform them too — but a plain single-pass Babel transform isn't enough:
+  // several of those files use `const require = createRequire(import.meta.url)` to
+  // lazily require optional peer deps, which needs its own fix-up before the import.meta
+  // rewrite runs (see test/transformers/nestjs-esm.js for exactly why order matters
+  // here). Runtime stays plain CommonJS end to end — no --experimental-vm-modules, no
+  // touching package.json.
   transformIgnorePatterns: ['/node_modules/(?!@nestjs/)'],
   transform: {
     '^.+\\.ts$': ['ts-jest', { tsconfig: '<rootDir>/tsconfig.spec.json' }],
-    '^.+\\.js$': 'babel-jest',
+    '^.+\\.js$': '<rootDir>/test/transformers/nestjs-esm.js',
   },
   moduleNameMapper: {
+    // decision: @nestjs/swagger's swagger-ui submodule only exists to serve the /docs HTML
+    // page — no unit test ever calls SwaggerModule.setup(), yet importing anything from
+    // '@nestjs/swagger' (even just the @ApiProperty decorator) pulls it in transitively.
+    // That file declares `const require = createRequire(import.meta.url)` in the same
+    // scope as several static imports; once Babel lowers those imports to require() calls,
+    // the hoisted `const require` shadows them and throws "Cannot access 'require' before
+    // initialization" — a transform artifact, not a real bug in our code or in Nest. This
+    // entry MUST come before the generic .js-stripping rule below (Jest uses the first
+    // matching entry), so it intercepts the swagger-ui import before that rule does.
+    'swagger-ui/index\\.js$': '<rootDir>/test/stubs/swagger-ui.stub.js',
     // decision: the generated Prisma client uses NodeNext-style relative imports with an
     // explicit .js extension (e.g. prisma.service.ts importing '../generated/prisma/client.js'),
     // which is correct for a real NodeNext build but has no matching .js file on disk when
