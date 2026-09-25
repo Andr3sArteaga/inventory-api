@@ -23,6 +23,8 @@ model Product {
   createdAt  DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   history ProductHistory[]
+  orderItems OrderItem[]
+  movements InventoryMovement[]
 }
 
 enum ActionType {
@@ -38,5 +40,54 @@ model ProductHistory {
   changes Json
   createdAt DateTime @default(now())
   product Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+}
+
+enum OrderStatus {
+  PENDING
+  CONFIRMED
+  SHIPPED
+  DELIVERED
+  CANCELLED
+}
+
+model Order {
+  id           String      @id @default(uuid())
+  customerName String
+  address      String
+  status       OrderStatus @default(PENDING)
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  items        OrderItem[]
+  movements    InventoryMovement[]
+}
+
+model OrderItem {
+  id        String  @id @default(uuid())
+  orderId   String
+  productId String
+  quantity  Int
+  unitPrice Decimal @db.Decimal(10, 2)
+  order     Order   @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  product   Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+}
+
+enum MovementType {
+  IN
+  OUT
+}
+
+model InventoryMovement {
+  id        String       @id @default(uuid())
+  productId String
+  type      MovementType
+  quantity  Int
+  reason    String?
+  orderId   String?
+  createdAt DateTime     @default(now())
+  product   Product      @relation(fields: [productId], references: [id], onDelete: Restrict)
+  order     Order?       @relation(fields: [orderId], references: [id], onDelete: SetNull)
+
+  @@index([productId])
+  @@index([orderId])
 }
 
