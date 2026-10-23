@@ -39,4 +39,5 @@ jobs:
       - run: npm run lint
       - run: npm run test -- --passWithNoTests
       - run: npm run build
-      - run: npm run test:e2e
+      - run: npx tsx scripts/ensure-test-db.ts
+      - run: npx jest --config ./test/jest-e2e.json --runInBand- run: npm run test:e2e
