@@ -40,4 +40,4 @@ jobs:
       - run: npm run test -- --passWithNoTests
       - run: npm run build
       - run: npx tsx scripts/ensure-test-db.ts
-      - run: npx jest --config ./test/jest-e2e.json --runInBand- run: npm run test:e2e
+      - run: npx jest --config ./test/jest-e2e.json --runInBand
